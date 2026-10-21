@@ -71,7 +71,9 @@ Add `plugin :stripe` to `puma.rb` configuration:
 plugin :stripe if ENV["RAILS_ENV"] == "development"
 ```
 
-By default, events will be forwarded to `/stripe_events`, this can be configured using `stripe_forward_to "/stripe/webhook"` in `puma.rb`.
+By default, all events will be forwarded to `/stripe_events`, this can be configured using `stripe_forward_to "/stripe/webhook"` in `puma.rb`.
+
+To forward the events of the webhook endpoints set up in your Stripe dashboard instead, add `stripe_use_configured_webhooks` to `puma.rb`. Each endpoint's events go to that endpoint's path on your local server, so an endpoint at `https://example.com/stripe/webhook` gets forwarded to `http://localhost:3000/stripe/webhook`. Your test mode account needs at least one webhook endpoint.
 
 You can grab your *signing secret* using `StripeCLI.signing_secret`. For example:
 
