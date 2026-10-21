@@ -11,7 +11,7 @@ Puma::Plugin.create do
 
     launcher.events.on_booted do
       launcher.log_writer.log "Stripe: forwarding webhooks to #{forward_to}"
-      @pid = spawn(StripeCLI.executable, "listen", "--forward-to", forward_to.to_s, "--api-key", Stripe.api_key.to_s)
+      @pid = spawn(StripeCLI.executable, "listen", "--all-snapshot", "--forward-to", forward_to.to_s, "--api-key", Stripe.api_key.to_s)
     rescue StripeCLI::UnsupportedPlatformException, StripeCLI::ExecutableNotFoundException, Errno::ENOENT => e
       launcher.log_writer.log "[Stripe] Could not start the Stripe CLI: #{e.message}"
     end
