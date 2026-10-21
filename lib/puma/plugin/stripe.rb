@@ -3,6 +3,7 @@
 require "puma"
 require "puma/plugin"
 require "stripe"
+require "stripe_cli"
 
 Puma::Plugin.create do
   def start(launcher)
@@ -10,11 +11,9 @@ Puma::Plugin.create do
 
     launcher.events.on_booted do
       launcher.log_writer.log "Stripe: forwarding webhooks to #{forward_to}"
-      @pid = fork do
-        exec "#{StripeCLI.executable} listen --forward-to #{forward_to} --api-key #{Stripe.api_key}"
-      rescue Errno::ENOENT
-        launcher.log_writer.log "[Stripe] Not found. See https://docs.stripe.com/stripe-cli#install"
-      end
+      @pid = spawn(StripeCLI.executable, "listen", "--forward-to", forward_to.to_s, "--api-key", Stripe.api_key.to_s)
+    rescue StripeCLI::UnsupportedPlatformException, StripeCLI::ExecutableNotFoundException, Errno::ENOENT => e
+      launcher.log_writer.log "[Stripe] Could not start the Stripe CLI: #{e.message}"
     end
 
     launcher.events.on_stopped { stop_stripe }
@@ -22,9 +21,10 @@ Puma::Plugin.create do
 
   private
     def stop_stripe
-      Process.waitpid(@pid, Process::WNOHANG)
+      return unless @pid
+
       @launcher.log_writer.log "[Stripe] Stopping..."
-      Process.kill(:INT, @pid) if @pid
+      Process.kill(:INT, @pid)
       Process.wait(@pid)
     rescue Errno::ECHILD, Errno::ESRCH
     end

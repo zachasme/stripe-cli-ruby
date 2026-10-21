@@ -13,7 +13,7 @@ Supported platforms are:
 - `arm64-darwin` (macos-arm64)
 - `x86_64-darwin` (macos-x64)
 - `x86_64-linux` (linux-x64)
-- `arm-linux` (linux-armv7)
+- `arm64-linux` (linux-arm64)
 
 Install the gem and add to the application's Gemfile by executing:
 
@@ -39,7 +39,7 @@ The gem makes available `StripeCLI.executable` which is the path to the vendored
 ```ruby
 require "stripe-cli-ruby"
 StripeCLI.executable
-# => "/path/to/installs/ruby/3.3.5/lib/ruby/gems/3.3.0/gems/stripe-cli-ruby-0.1.0-x86_64-linux/exe/x86_64-linux/stripe"
+# => "/path/to/gems/stripe-cli-ruby-1.33.0-x86_64-linux/exe/x86_64-linux/stripe"
 ```
 
 ### Command line
@@ -52,8 +52,8 @@ $ bundle exec which stripe
 /path/to/installs/ruby/3.3/bin/stripe
 
 # run the actual executable through the shim
-$ bundle exec stripe --help
-stripe version 1.25.1
+$ bundle exec stripe --version
+stripe version 1.33.0
 ```
 
 ## Forwarding events to your web server
@@ -79,7 +79,7 @@ You can grab your *signing secret* using `StripeCLI.signing_secret`. For example
 # config/environments/development.rb
 config.stripe_signing_secret = StripeCLI.signing_secret(Stripe.api_key)
 
-# app/constrollers/stripe_events_controller.rb
+# app/controllers/stripe_events_controller.rb
 class StripeEventsController < ActionController::API
   before_action :set_event
 
@@ -110,9 +110,17 @@ end
 
 ## Development
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
+Run `bin/setup` to install dependencies, `bundle exec rake download` to fetch the Stripe CLI binaries, and `bundle exec rake test` to run the tests. Set `TEST_STRIPE_API_KEY` to a test-mode key to run the tests that talk to Stripe.
 
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `stripe-cli-ruby.gemspec`, and then run `bin/cut`, which will create a git tag for the version, push git commits and the created tag, and push the `.gem` files to [rubygems.org](https://rubygems.org).
+## Releases
+
+Releases are automatic:
+
+1. The `update` workflow checks for a new Stripe CLI release every day. When there is one, the workflow bumps `StripeCLI::VERSION` and `StripeCLI::Upstream::VERSION` and pushes the commit to `main`.
+2. The `ci` workflow tests every push to `main`, builds a gem per platform, and installs each one on its platform.
+3. When `StripeCLI::VERSION` isn't tagged yet, `ci` pushes the gems to rubygems.org with [trusted publishing](https://guides.rubygems.org/trusted-publishing/) and creates a GitHub release.
+
+To ship a fix without a new Stripe CLI version, bump `StripeCLI::VERSION` to something like `1.33.0.1` and push to `main`.
 
 ## Contributing
 

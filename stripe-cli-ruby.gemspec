@@ -11,10 +11,10 @@ Gem::Specification.new do |spec|
   spec.summary = "A self-contained `stripe` executable."
   spec.homepage = "https://github.com/zachasme/stripe-cli-ruby"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.1.0"
+  spec.required_ruby_version = ">= 3.2.0"
 
   spec.metadata["source_code_uri"] = spec.homepage
-  spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata["changelog_uri"] = "#{spec.homepage}/releases"
   spec.metadata["rubygems_mfa_required"] = "true"
 
   spec.files = Dir["lib/**/*", "LICENSE.txt", "LICENSE-DEPENDENCIES", "README.md"]

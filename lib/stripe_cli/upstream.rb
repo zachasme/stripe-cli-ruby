@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 module StripeCLI
-  # constants describing the upstream tailwindcss project
+  # constants describing the upstream stripe/stripe-cli project
   module Upstream
     VERSION = "1.33.0"
 
