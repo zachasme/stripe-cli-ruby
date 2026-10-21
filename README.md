@@ -1,118 +1,111 @@
 # stripe-cli-ruby
 
-A self-contained Stripe CLI executable, wrapped up in a ruby gem. Includes a puma plugin to forward Stripe webhook events to your web server.
+The [Stripe CLI](https://github.com/stripe/stripe-cli) as a Ruby gem, plus a Puma plugin that forwards Stripe webhooks to your app in development.
 
-The binary distribution part is lifted from https://github.com/flavorjones/tailwindcss-ruby.
+The gem's version matches the Stripe CLI version it ships. A new Stripe CLI release gets a new gem within a day.
 
 ## Installation
 
-This gem wraps the [Stripe CLI executable](https://github.com/stripe/stripe-cli). These executables are platform specific, so there are actually separate underlying gems per platform, but the correct gem will automatically be picked for your platform.
-
-Supported platforms are:
-
-- `arm64-darwin` (macos-arm64)
-- `x86_64-darwin` (macos-x64)
-- `x86_64-linux` (linux-x64)
-- `aarch64-linux` (linux-arm64)
-
-Install the gem and add to the application's Gemfile by executing:
-
-```
+```bash
 bundle add stripe-cli-ruby --group development
 ```
 
-If bundler is not being used to manage dependencies, install the gem by executing:
+Bundler picks the gem for your platform, which includes the `stripe` binary. Supported platforms:
 
-```bash
-gem install stripe-cli-ruby
-```
+- `arm64-darwin` (macOS on Apple silicon)
+- `x86_64-darwin` (macOS on Intel)
+- `aarch64-linux` (Linux on ARM)
+- `x86_64-linux` (Linux on x86, glibc and musl)
 
-> [!NOTE]
-> Add the [included puma plugin](#forwarding-events-to-your-web-server) in order to listen for webhook events in development.
+## Webhooks in development
 
-## Usage
+The Puma plugin starts `stripe listen` when Puma boots and stops it when Puma stops. You don't need `stripe login` or a second terminal.
 
-### Ruby
+1. Set `Stripe.api_key`. The plugin passes it to the Stripe CLI. The plugin also needs the [stripe gem](https://github.com/stripe/stripe-ruby).
 
-The gem makes available `StripeCLI.executable` which is the path to the vendored standalone executable.
+    ```ruby
+    # config/initializers/stripe.rb
+    Stripe.api_key = Rails.application.credentials.dig(:stripe, :secret_key)
+    ```
+
+2. Add the plugin to `config/puma.rb`:
+
+    ```ruby
+    plugin :stripe if ENV.fetch("RAILS_ENV", "development") == "development"
+    ```
+
+3. Verify webhooks with the Stripe CLI's signing secret:
+
+    ```ruby
+    # config/environments/development.rb
+    config.x.stripe.signing_secret = StripeCLI.signing_secret(Stripe.api_key)
+
+    # config/environments/production.rb
+    config.x.stripe.signing_secret = Rails.application.credentials.dig(:stripe, :signing_secret)
+    ```
+
+    ```ruby
+    # config/routes.rb
+    post "stripe_events", to: "stripe_events#create"
+
+    # app/controllers/stripe_events_controller.rb
+    class StripeEventsController < ActionController::API
+      def create
+        event = Stripe::Webhook.construct_event(
+          request.body.read,
+          request.headers["Stripe-Signature"],
+          Rails.configuration.x.stripe.signing_secret
+        )
+
+        case event.type
+        when "payment_intent.succeeded"
+          payment_intent = event.data.object
+          # ...
+        end
+
+        head :ok
+      rescue JSON::ParserError, Stripe::SignatureVerificationError
+        head :bad_request
+      end
+    end
+    ```
+
+`StripeCLI.signing_secret` returns `nil` when the Stripe CLI can't get a secret, for example when the API key is wrong.
+
+### Choosing events
+
+By default the plugin forwards every snapshot event (the regular kind, not [thin events](https://docs.stripe.com/event-destinations#thin-events)) to `/stripe_events`. Change the path in `config/puma.rb`:
 
 ```ruby
-require "stripe-cli-ruby"
+stripe_forward_to "/stripe/webhooks"
+```
+
+Or forward the webhook endpoints you set up in the Stripe dashboard:
+
+```ruby
+stripe_use_configured_webhooks
+```
+
+Each dashboard endpoint then gets only the events it listens to, at its own path on your app. An endpoint at `https://example.com/stripe/webhooks` gets forwarded to `http://localhost:3000/stripe/webhooks`. The Stripe CLI exits if the account doesn't have any webhook endpoints in test mode. Stripe also sends real deliveries to the endpoint's URL, so point it at a server that answers, like staging. Otherwise Stripe disables the endpoint after a few days of failures.
+
+## Running the Stripe CLI
+
+The gem adds a `stripe` command:
+
+```bash
+bundle exec stripe trigger payment_intent.succeeded
+```
+
+From Ruby, `StripeCLI.executable` returns the binary's path:
+
+```ruby
 StripeCLI.executable
-# => "/path/to/gems/stripe-cli-ruby-1.33.0-x86_64-linux/exe/x86_64-linux/stripe"
-```
-
-### Command line
-
-This gem provides an executable `stripe` shim that will run the vendored standalone executable.
-
-```bash
-# where is the shim?
-$ bundle exec which stripe
-/path/to/installs/ruby/3.3/bin/stripe
-
-# run the actual executable through the shim
-$ bundle exec stripe --version
-stripe version 1.33.0
-```
-
-## Forwarding events to your web server
-
-Make sure `Stripe.api_key` is set, e.g. in `config/initializers/stripe.rb`:
-
-```ruby
-Stripe.api_key = "sk_test_..."
-```
-
-Add `plugin :stripe` to `puma.rb` configuration:
-
-```ruby
-# Run stripe cli only in development.
-plugin :stripe if ENV["RAILS_ENV"] == "development"
-```
-
-By default, all events will be forwarded to `/stripe_events`, this can be configured using `stripe_forward_to "/stripe/webhook"` in `puma.rb`.
-
-To forward the events of the webhook endpoints set up in your Stripe dashboard instead, add `stripe_use_configured_webhooks` to `puma.rb`. Each endpoint's events go to that endpoint's path on your local server, so an endpoint at `https://example.com/stripe/webhook` gets forwarded to `http://localhost:3000/stripe/webhook`. Your test mode account needs at least one webhook endpoint.
-
-You can grab your *signing secret* using `StripeCLI.signing_secret`. For example:
-
-```ruby
-# config/environments/development.rb
-config.stripe_signing_secret = StripeCLI.signing_secret(Stripe.api_key)
-
-# app/controllers/stripe_events_controller.rb
-class StripeEventsController < ActionController::API
-  before_action :set_event
-
-  def create
-    case event.type
-    when 'payment_intent.succeeded'
-      payment_intent = event.data.object
-      # ...
-    end
-
-    head :ok
-  end
-
-  private
-
-    def event
-      @event ||= Stripe::Webhook.construct_event(
-        request.body.read,
-        request.headers["stripe-signature"],
-        Rails.configuration.stripe_signing_secret
-      )
-    rescue => error
-      logger.error error
-      head :bad_request
-    end
-end
+# => "/path/to/gems/stripe-cli-ruby-<version>-x86_64-linux/exe/x86_64-linux/stripe"
 ```
 
 ## Development
 
-Run `bin/setup` to install dependencies, `bundle exec rake download` to fetch the Stripe CLI binaries, and `bundle exec rake test` to run the tests. Set `TEST_STRIPE_API_KEY` to a test-mode key to run the tests that talk to Stripe.
+Run `bin/setup` to install dependencies, `bundle exec rake download` to fetch the Stripe CLI binaries, and `bundle exec rake test` to run the tests. Set `TEST_STRIPE_API_KEY` to a test mode key to run the tests that talk to Stripe. The dashboard test also needs an enabled webhook endpoint for `customer.created` on that account, and skips without one.
 
 ## Releases
 
@@ -122,12 +115,8 @@ Releases are automatic:
 2. The `ci` workflow tests every push to `main`, builds a gem per platform, and installs each one on its platform.
 3. When `StripeCLI::VERSION` isn't tagged yet, `ci` pushes the gems to rubygems.org with [trusted publishing](https://guides.rubygems.org/trusted-publishing/) and creates a GitHub release.
 
-To ship a fix without a new Stripe CLI version, bump `StripeCLI::VERSION` to something like `1.33.0.1` and push to `main`.
-
-## Contributing
-
-Bug reports and pull requests are welcome on GitHub at https://github.com/zachasme/stripe-cli-ruby.
+To ship a fix without a new Stripe CLI version, add a fourth number to `StripeCLI::VERSION`, like `1.54.1.1`, and push to `main`.
 
 ## License
 
-The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
+The gem is available under the [MIT License](LICENSE.txt). The Stripe CLI is under the [Apache License 2.0](LICENSE-DEPENDENCIES). The packaging is based on [tailwindcss-ruby](https://github.com/flavorjones/tailwindcss-ruby).
