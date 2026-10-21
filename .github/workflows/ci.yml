@@ -1,119 +1,132 @@
 name: ci
-concurrency:
-  group: "${{github.workflow}}-${{github.ref}}"
-  cancel-in-progress: true
+
 on:
-  workflow_dispatch:
   push:
-    # branches:
-    #   - main
-    # tags:
-    #   - v*.*.*
+    branches: [ main ]
   pull_request:
-    # types: [opened, synchronize]
-    # branches:
-    #   - '*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
+    name: test (${{ matrix.ruby }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        ruby: ["3.1", "3.2", "3.3", "3.4", "head"]
+        ruby: [ "3.2", "3.3", "3.4", "4.0", "head" ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: rm Gemfile.lock
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ${{matrix.ruby}}
-          bundler: latest
+          ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
-      - name: Run tests
-        run: bundle exec rake test
+      - run: bundle exec rake download
+      - run: bundle exec rake test
+        env:
+          TEST_STRIPE_API_KEY: ${{ secrets.TEST_STRIPE_API_KEY }}
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ruby
+          bundler-cache: true
+      - run: bundle exec rubocop
 
   package:
-    needs: [ "test" ]
-    name: "package (${{ matrix.platform }})"
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - "ruby"
-          - "arm64-darwin"
-          - "arm64-linux"
-          - "x86_64-darwin"
-          - "x86_64-linux"
+    name: package (${{ matrix.platform }})
+    needs: [ test, lint ]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [ ruby, arm64-darwin, aarch64-linux, x86_64-darwin, x86_64-linux ]
     steps:
-      - uses: actions/checkout@v4
-      - run: rm Gemfile.lock
+      - uses: actions/checkout@v5
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.2"
-          bundler: latest
+          ruby-version: ruby
           bundler-cache: true
-      - run: "bundle exec rake gem:${{matrix.platform}}"
+      - run: bundle exec rake gem:${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
         with:
-          name: gem-${{matrix.platform}}
-          path: pkg
-          retention-days: 1
+          name: gem-${{ matrix.platform }}
+          path: pkg/*.gem
 
-  install-ruby:
-    name: "install (ruby)"
-    needs: [ "package" ]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.2"
-      - uses: actions/download-artifact@v4
-        with:
-          name: gem-ruby
-          path: pkg
-      - run: "gem install pkg/stripe-cli-ruby-*.gem"
-      - run: "stripe 2>&1 | fgrep 'ERROR: Cannot find the stripe cli executable'"
-
-  install-native:
-    name: "install (${{ matrix.platform }})"
-    needs: [ "package" ]
+  install:
+    name: install (${{ matrix.platform }})
+    needs: package
+    runs-on: ${{ matrix.runs-on }}
     strategy:
       fail-fast: false
       matrix:
-        ruby: [ "3.4" ]
-        platform:
-          - "arm64-darwin"
-          # - "arm64-linux"
-          - "x86_64-darwin"
-          - "x86_64-linux"
         include:
-          - { platform: arm64-darwin, runs_on: macos-14 }
-          # - { platform: arm64-linux, docker_platform: "--platform=linux/arm64/v8" }
-          - { platform: x86_64-darwin, runs_on: macos-13 }
-          - { platform: x86_64-linux, docker_tag: "-alpine", bootstrap: "apk add build-base &&" }
-    runs-on: ${{ matrix.runs_on || 'ubuntu-latest' }}
+          - { platform: ruby, runs-on: ubuntu-latest }
+          - { platform: arm64-darwin, runs-on: macos-latest }
+          - { platform: aarch64-linux, runs-on: ubuntu-24.04-arm }
+          - { platform: x86_64-darwin, runs-on: macos-15-intel }
+          - { platform: x86_64-linux, runs-on: ubuntu-latest }
+          - { platform: x86_64-linux, runs-on: ubuntu-latest, image: "ruby:alpine" }
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: gem-${{ matrix.platform }}
           path: pkg
-      - if: ${{ matrix.runs_on }}
+      - if: "!matrix.image"
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ${{ matrix.ruby }}
-      - if: ${{ matrix.runs_on }}
-        run: "gem install pkg/stripe-cli-ruby-*.gem"
-      - if: ${{ matrix.runs_on }}
-        run: "stripe --help"
-      - if: ${{ (! matrix.runs_on) && matrix.docker_platform }}
-        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-      - if: ${{ ! matrix.runs_on }}
+          ruby-version: ruby
+      - if: "!matrix.image"
+        run: gem install pkg/*.gem
+      - if: matrix.platform == 'ruby'
+        run: stripe 2>&1 | grep -F 'Cannot find the stripe cli executable'
+      - if: matrix.platform != 'ruby' && !matrix.image
+        run: stripe --version
+      - if: matrix.image
+        run: docker run --rm -v "$PWD/pkg:/pkg" ${{ matrix.image }} sh -c "gem install /pkg/*.gem && stripe --version"
+
+  # Publishes when lib/stripe_cli/version.rb names a version that isn't tagged yet.
+  release:
+    needs: install
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - id: version
         run: |
-          docker run --rm -v $PWD:/ruby-strie-cli -w /ruby-strie-cli \
-            ${{ matrix.docker_platform }} ruby:${{ matrix.ruby }}${{ matrix.docker_tag }} \
-            sh -c "
-              ${{ matrix.bootstrap }}
-              gem install pkg/stripe-cli-ruby-*.gem
-              stripe --help
-            "
+          version=$(ruby -r ./lib/stripe_cli/version -e 'print StripeCLI::VERSION')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version"; then
+            echo "Already released v$version"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.version.outputs.new
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gem-*
+          merge-multiple: true
+          path: pkg
+      - if: steps.version.outputs.new
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ruby
+      - if: steps.version.outputs.new
+        uses: rubygems/configure-rubygems-credentials@v2.1.0
+      - if: steps.version.outputs.new
+        run: for gem in pkg/*.gem; do gem push "$gem"; done
+      - if: steps.version.outputs.new
+        run: gh release create "v$VERSION" pkg/*.gem --target "$GITHUB_SHA" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}

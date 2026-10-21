@@ -16,10 +16,6 @@ module StripeCLI
   class ExecutableNotFoundException < StandardError
   end
 
-  # raised when STRIPE_CLI_INSTALL_DIR does not exist
-  class DirectoryNotFoundException < StandardError
-  end
-
   class << self
     def platform
       [ :cpu, :os ].map { |m| Gem::Platform.local.send(m) }.join("-")
@@ -28,9 +24,8 @@ module StripeCLI
     def executable(exe_path: DEFAULT_DIR)
       if StripeCLI::Upstream::NATIVE_PLATFORMS.keys.none? { |p| Gem::Platform.match_gem?(Gem::Platform.new(p), GEM_NAME) }
         raise UnsupportedPlatformException, <<~MESSAGE
-          #{GEM_NAME} does not support the #{platform} platform
-          See https://github.com/flavorjones/tailwindcss-ruby#using-a-local-installation-of-tailwindcss
-          for more details.
+          #{GEM_NAME} does not support the #{platform} platform.
+          Install the Stripe CLI another way: https://docs.stripe.com/stripe-cli#install
         MESSAGE
       end
 
@@ -55,9 +50,7 @@ module StripeCLI
           See `bundle lock --help` output for details.
 
           If you're still seeing this message after taking those steps, try running
-          `bundle config` and ensure `force_ruby_platform` isn't set to `true`. See
-          https://github.com/flavorjones/tailwindcss-ruby#check-bundle_force_ruby_platform
-          for more details.
+          `bundle config` and ensure `force_ruby_platform` isn't set to `true`.
         MESSAGE
       end
 

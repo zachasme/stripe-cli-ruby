@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-
-rake clobber
-rake package
-for g in pkg/*.gem ; do gem push $g ; done
