@@ -13,7 +13,7 @@ Supported platforms are:
 - `arm64-darwin` (macos-arm64)
 - `x86_64-darwin` (macos-x64)
 - `x86_64-linux` (linux-x64)
-- `arm64-linux` (linux-arm64)
+- `aarch64-linux` (linux-arm64)
 
 Install the gem and add to the application's Gemfile by executing:
 
