@@ -3,7 +3,7 @@
 module StripeCLI
   # constants describing the upstream stripe/stripe-cli project
   module Upstream
-    VERSION = "1.33.0"
+    VERSION = "1.54.1"
 
     # rubygems platform name => upstream release filename
     NATIVE_PLATFORMS = {
