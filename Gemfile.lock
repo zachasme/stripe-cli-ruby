@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    stripe-cli-ruby (1.54.1)
+    stripe-cli-ruby (1.55.0)
 
 GEM
   remote: https://rubygems.org/
