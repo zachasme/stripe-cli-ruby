@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
 module StripeCLI
-  VERSION = "1.55.12"
+  VERSION = "1.55.13"
 end
